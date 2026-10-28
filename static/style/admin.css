@@ -1,0 +1,63 @@
+/* ====== СТРАНИЦА АДМИНКИ ====== */
+.admin-container {
+    max-width: 1200px;
+    margin: 24px auto;
+    padding: 0 24px;
+}
+.admin-card {
+    background: var(--md-surface);
+    border-radius: var(--md-radius-lg);
+    padding: 24px;
+    margin-bottom: 24px;
+    border: 1px solid var(--md-outline-variant);
+}
+.admin-card h2 {
+    font-size: 18px;
+    margin-bottom: 16px;
+    color: var(--md-on-surface);
+    font-weight: 500;
+}
+.admin-form-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr 200px auto;
+    gap: 12px;
+    align-items: end;
+}
+.admin-form-row .form-group { margin: 0; }
+.admin-form-row .btn { height: 44px; }
+.admin-message {
+    margin-top: 12px;
+    font-size: 13px;
+    display: none;
+}
+.admin-message.show { display: block; }
+.admin-message.success { color: var(--md-success); }
+.admin-message.error { color: var(--md-error); }
+.admin-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+}
+.admin-table thead tr {
+    border-bottom: 2px solid var(--md-outline-variant);
+}
+.admin-table th {
+    text-align: left;
+    padding: 10px;
+    color: var(--md-on-surface-muted);
+    font-weight: 500;
+}
+.admin-table th:last-child { text-align: right; }
+.admin-table td {
+    padding: 10px;
+    border-bottom: 1px solid var(--md-outline-variant);
+    color: var(--md-on-surface);
+}
+.admin-table td:last-child { text-align: right; }
+.admin-table .role-admin { color: var(--md-error); font-weight: 500; }
+.admin-table .role-editor { color: var(--md-primary); font-weight: 500; }
+.admin-table .role-viewer { color: var(--md-success); font-weight: 500; }
+.admin-table .status-active { color: var(--md-success); }
+.admin-table .status-blocked { color: var(--md-error); }
+.admin-table .self-mark { color: var(--md-on-surface-muted); font-size: 11px; }
+.admin-table .btn-small { margin-left: 4px; }

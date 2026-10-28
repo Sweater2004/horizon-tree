@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Вход — Horizon Tree</title>
+    <link rel="stylesheet" href="/static/style/style.css">
+    <link rel="stylesheet" href="/static/style/login.css">
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+</head>
+<body>
+    <div class="login-page">
+        <div class="login-card">
+    <div class="login-logo">
+            <h1>Horizon <span>Tree</span></h1>
+        </div>
+        <p class="login-subtitle">Система мониторинга топологии сети</p>
+
+        <form id="loginForm" onsubmit="return false;">
+            <div class="form-group">
+                <label class="form-label" for="username">Логин</label>
+                <input type="text" id="username" class="form-input"
+                       placeholder="admin" autofocus autocomplete="username">
+            </div>
+            <div class="form-group">
+                <label class="form-label" for="password">Пароль</label>
+                <input type="password" id="password" class="form-input"
+                       placeholder="Введите пароль" autocomplete="current-password">
+            </div>
+            <button type="submit" class="btn btn-primary" id="loginBtn" onclick="login()">
+                <span class="login-spinner"></span>
+                <span class="btn-text">Войти</span>
+            </button>
+            <div id="errorMessage" class="login-error"></div>
+        </form>
+
+        <div class="login-hint">
+            Пароль администратора: <code>admin_password.txt</code> в папке проекта
+        </div>
+
+        <div class="login-footer">
+            Horizon Tree
+        </div>
+    </div>
+        </div>
+    <script src="/static/js/login.js"></script>
+</body>
+</body>
+</html>

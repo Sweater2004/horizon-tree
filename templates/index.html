@@ -1,0 +1,516 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Horizon Tree</title>
+    <link rel="stylesheet" href="/static/style/style.css">
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <script src="/static/js/vis-network.min.js"></script>
+    <script src="/static/js/chart.js"></script>
+</head>
+<body>
+    <header>
+        <h1>Horizon <span>Tree</span></h1>
+        <div class="header-right">
+            <div class="header-group">
+                <button class="btn" onclick="openNewMapModal()">Новая карта</button>
+                <button class="btn btn-primary" onclick="openScanModal()">Сканировать</button>
+            </div>
+            <div class="header-group">
+                <button class="btn btn-success" onclick="openAddNodeModal()">Добавить устройства</button>
+            </div>
+            <div class="header-group">
+                <div class="dropdown">
+                    <button class="btn btn-icon" onclick="toggleDropdown(event)">⋯</button>
+                    <div class="dropdown-menu" id="mainDropdown">
+                        <button class="dropdown-item" onclick="exportCurrentMap(); closeDropdown()">Экспорт</button>
+                        <button class="dropdown-item" onclick="openImportModal(); closeDropdown()">Импорт</button>
+                        <div class="dropdown-divider"></div>
+                        <button class="dropdown-item" onclick="openMergeModal(); closeDropdown()">Объединить устройства</button>
+                        <button class="dropdown-item" onclick="openLinkRootsModal(); closeDropdown()">Связать корни</button>
+                    </div>
+                </div>
+                <span class="user-badge" id="userBadge">Загрузка...</span>
+                <button class="btn btn-danger btn-icon" onclick="logout()" title="Выйти">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/>
+                    </svg>
+                </button>
+            </div>
+        </div>
+    </header>
+    <div class="main">
+        <aside class="sidebar">
+            <div class="sidebar-section">
+                <div class="sidebar-title">Карты</div>
+                <div id="mapsList">
+                    <div style="color: var(--md-on-surface-muted); font-size: 13px; padding: 8px;">Загрузка...</div>
+                </div>
+            </div>
+            <div class="tree-list" id="treeList">
+                <div style="color: var(--md-on-surface-muted); font-size: 13px; text-align: center; padding: 20px;">
+                    Выберите карту
+                </div>
+            </div>
+        </aside>
+        <div class="graph-container">
+            <div class="current-map-bar" id="currentMapBar" style="display:none;">
+                <div class="current-map-info">
+                    <span class="current-map-name" id="currentMapName">—</span>
+                    <span class="current-map-version" id="currentMapVersion">—</span>
+                </div>
+                <div class="map-stats" id="mapStats">
+                    <span class="stat-badge stat-total" title="Всего узлов">—</span>
+                    <span class="stat-badge stat-online" title="Все IP online">—</span>
+                    <span class="stat-badge stat-mixed" title="Часть IP offline">—</span>
+                    <span class="stat-badge stat-offline" title="Все IP offline">—</span>
+                    <span class="stat-badge stat-uptime" title="Uptime (24ч)">—</span>
+                </div>
+                <div class="current-map-actions">
+                    <button class="btn btn-small" onclick="openRenameMapModal()">Переименовать</button>
+                    <button class="btn btn-small btn-danger" onclick="deleteCurrentMap()">Удалить</button>
+                </div>
+            </div>
+            <div id="network"></div>
+            <div class="empty-state" id="emptyState">
+                <h2>Нет данных</h2>
+                <p>Выберите карту или создайте новую</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Модалка свойств (по центру) -->
+    <aside class="props-panel" id="propsPanel">
+        <div class="props-header">
+            <button class="props-close" onclick="closePropsPanel()" title="Закрыть">
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+                    <path d="M3 3 L13 13 M13 3 L3 13"/>
+                </svg>
+            </button>
+            <div class="props-title" id="propsTitle">—</div>
+            <div class="props-ip" id="propsIp">—</div>
+            <button class="btn btn-small" style="margin-top: 8px; width: 100%;" onclick="openEditInterfacesModal()">Изменить интерфейсы</button>
+        </div>
+        <div class="props-grid">
+            <div class="props-item">
+                <div class="props-label">Тип</div>
+                <div class="props-value" id="propsType">—</div>
+            </div>
+            <div class="props-item">
+                <div class="props-label">Статус</div>
+                <div class="props-value" id="propsStatus">—</div>
+            </div>
+            <div class="props-item">
+                <div class="props-label">Обнаружено</div>
+                <div class="props-value" id="propsDiscovered">—</div>
+            </div>
+        </div>
+        <div class="props-section">
+            <div class="props-section-header">
+                <span class="props-label">Проверки</span>
+                <button class="btn btn-small" onclick="openChecksEditor()">Изменить</button>
+            </div>
+            <div class="checks-list" id="checksList">
+                <div style="color: var(--md-on-surface-muted); font-size: 13px;">Нет проверок</div>
+            </div>
+        </div>
+        <div class="props-section" id="snmpSection" style="display:none;">
+            <div class="props-label">SNMP</div>
+            <div class="props-value" id="propsSnmp">—</div>
+        </div>
+        <div class="props-actions">
+            <button class="btn btn-primary" onclick="openEditNodeModal()">Редактировать</button>
+            <button class="btn" onclick="openHistory()">История</button>
+            <button class="btn btn-danger" onclick="deleteSelectedNode()">Удалить</button>
+        </div>
+    </aside>
+    <div class="props-overlay" id="propsOverlay" onclick="closePropsPanel()"></div>
+
+    <!-- Модалка: новая карта -->
+    <div class="modal-overlay" id="newMapModal">
+        <div class="modal">
+            <div class="modal-header">
+                <div class="modal-title">Новая карта</div>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Название</label>
+                <input type="text" id="newMapName" class="form-input" placeholder="Моя сеть">
+            </div>
+            <div class="form-group">
+                <label class="form-label">Описание</label>
+                <input type="text" id="newMapDescription" class="form-input" placeholder="Необязательно">
+            </div>
+            <div class="form-group">
+                <label class="form-label">Разрешённые подсети (через запятую)</label>
+                <input type="text" id="newMapSubnets" class="form-input" placeholder="192.168.178.0/24" value="192.168.178.0/24">
+                <div class="form-hint">CIDR-нотация. Пусто — взять из глобальных настроек.</div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn" onclick="closeModal('newMapModal')">Отмена</button>
+                <button class="btn btn-primary" onclick="createMap()">Создать</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Модалка: сканирование -->
+    <div class="modal-overlay" id="scanModal">
+        <div class="modal">
+            <div class="modal-header">
+                <div class="modal-title">Сканирование топологии</div>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Корневой IP (шлюз)</label>
+                <input type="text" id="scanRootIp" class="form-input" placeholder="192.168.178.1">
+            </div>
+            <div class="form-group">
+                <label class="form-label">Количество hops</label>
+                <input type="number" id="scanHops" class="form-input" value="2" min="1" max="10">
+            </div>
+            <div class="form-group">
+                <label class="form-label">Подсеть (опционально)</label>
+                <input type="text" id="scanSubnet" class="form-input" placeholder="192.168.178.0/24">
+                <div class="form-hint">Если пусто — берётся /24 от корневого IP.</div>
+            </div>
+            <div class="form-group">
+                <label style="display:flex; align-items:center; gap:8px; cursor:pointer; color: var(--md-on-surface); font-size:14px;">
+                    <input type="checkbox" id="scanUseSnmp">
+                    <span>SNMP-обогащение (если устройства поддерживают)</span>
+                </label>
+            </div>
+            <div id="scanProgress" style="display:none;">
+                <div class="progress-bar">
+                    <div class="progress-fill" id="scanProgressFill"></div>
+                </div>
+                <div class="progress-text" id="scanProgressText">0%</div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn" onclick="closeModal('scanModal')" id="scanCancelBtn">Отмена</button>
+                <button class="btn btn-primary" onclick="startScan()" id="scanStartBtn">Сканировать</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Модалка: добавление узла -->
+    <div class="modal-overlay" id="addNodeModal">
+        <div class="modal">
+            <div class="modal-header">
+                <div class="modal-title">Добавить устройство</div>
+            </div>
+            <div class="form-group">
+                <label class="form-label">IP-адрес</label>
+                <input type="text" id="addNodeIp" class="form-input" placeholder="192.168.1.10">
+            </div>
+            <div class="form-group">
+                <label class="form-label">Имя (опционально)</label>
+                <input type="text" id="addNodeName" class="form-input" placeholder="Сервер БД">
+            </div>
+            <div class="form-group">
+                <label class="form-label">Тип</label>
+                <select id="addNodeType" class="form-input">
+                    <option value="unknown">Unknown</option>
+                    <option value="router">Router</option>
+                    <option value="switch">Switch</option>
+                    <option value="server">Server</option>
+                    <option value="pc">PC</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Родительское устройство (опционально)</label>
+                <select id="addNodeParent" class="form-input">
+                    <option value="">— Корень карты —</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Проверки</label>
+                <div style="display:flex; flex-wrap:wrap; gap:12px; margin-top:6px;">
+                    <label style="display:flex; align-items:center; gap:6px; color:var(--md-on-surface); font-size:13px; cursor:pointer;">
+                        <input type="checkbox" id="addCheckIcmp" checked>
+                        <span>ICMP</span>
+                    </label>
+                    <label style="display:flex; align-items:center; gap:6px; color:var(--md-on-surface); font-size:13px; cursor:pointer;">
+                        <input type="checkbox" id="addCheckTcp">
+                        <span>TCP</span>
+                    </label>
+                    <input type="number" id="addCheckTcpPort" class="form-input" placeholder="Порт" value="22" style="width:80px; padding:6px;">
+                    <label style="display:flex; align-items:center; gap:6px; color:var(--md-on-surface); font-size:13px; cursor:pointer;">
+                        <input type="checkbox" id="addCheckSnmp">
+                        <span>SNMP</span>
+                    </label>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn" onclick="closeModal('addNodeModal')">Отмена</button>
+                <button class="btn btn-success" onclick="addNode()" id="addNodeBtn">Добавить</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Модалка: проверки -->
+    <div class="modal-overlay" id="checksModal">
+        <div class="modal">
+            <div class="modal-header">
+                <div class="modal-title" id="checksModalTitle">Проверки узла</div>
+            </div>
+            <div style="display:flex; align-items:center; gap:10px; padding:10px; background:var(--md-surface-2); border-radius:8px; margin-bottom:8px;">
+                <input type="checkbox" id="chkIcmpEnabled">
+                <span style="flex:1; color:var(--md-on-surface);">ICMP (ping)</span>
+                <input type="number" id="chkIcmpTimeout" class="form-input" value="2" style="width:70px; padding:6px;">
+                <span style="color:var(--md-on-surface-muted); font-size:12px;">сек</span>
+            </div>
+            <div style="display:flex; align-items:center; gap:10px; padding:10px; background:var(--md-surface-2); border-radius:8px; margin-bottom:8px;">
+                <input type="checkbox" id="chkTcpEnabled">
+                <span style="flex:1; color:var(--md-on-surface);">TCP</span>
+                <input type="number" id="chkTcpPort" class="form-input" value="22" placeholder="Порт" style="width:80px; padding:6px;">
+                <input type="number" id="chkTcpTimeout" class="form-input" value="3" style="width:70px; padding:6px;">
+                <span style="color:var(--md-on-surface-muted); font-size:12px;">сек</span>
+            </div>
+            <div style="display:flex; align-items:center; gap:10px; padding:10px; background:var(--md-surface-2); border-radius:8px; margin-bottom:8px;">
+                <input type="checkbox" id="chkUdpEnabled">
+                <span style="flex:1; color:var(--md-on-surface);">UDP</span>
+                <input type="number" id="chkUdpPort" class="form-input" value="53" placeholder="Порт" style="width:80px; padding:6px;">
+                <input type="number" id="chkUdpTimeout" class="form-input" value="3" style="width:70px; padding:6px;">
+                <span style="color:var(--md-on-surface-muted); font-size:12px;">сек</span>
+            </div>
+            <div style="display:flex; align-items:center; gap:10px; padding:10px; background:var(--md-surface-2); border-radius:8px; margin-bottom:8px;">
+                <input type="checkbox" id="chkSnmpEnabled">
+                <span style="flex:1; color:var(--md-on-surface);">SNMP (get sysName)</span>
+                <input type="number" id="chkSnmpTimeout" class="form-input" value="3" style="width:70px; padding:6px;">
+                <span style="color:var(--md-on-surface-muted); font-size:12px;">сек</span>
+            </div>
+            <div class="modal-footer">
+                <button class="btn" onclick="closeModal('checksModal')">Отмена</button>
+                <button class="btn btn-success" onclick="saveChecks()" id="saveChecksBtn">Сохранить</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Модалка: редактирование узла -->
+    <div class="modal-overlay" id="editNodeModal">
+        <div class="modal">
+            <div class="modal-header">
+                <div class="modal-title" id="editNodeTitle">Редактировать устройство</div>
+            </div>
+            <div class="form-group">
+                <label class="form-label">IP-адрес</label>
+                <input type="text" id="editNodeIp" class="form-input">
+                <div class="form-hint">При смене IP устройство будет переименовано (ID строится из IP)</div>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Имя</label>
+                <input type="text" id="editNodeName" class="form-input">
+            </div>
+            <div class="form-group">
+                <label class="form-label">Тип</label>
+                <select id="editNodeType" class="form-input">
+                    <option value="unknown">Unknown</option>
+                    <option value="router">Router</option>
+                    <option value="switch">Switch</option>
+                    <option value="server">Server</option>
+                    <option value="pc">PC</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Иконка</label>
+                <div class="icon-picker" id="editNodeIconPicker">
+                    <div class="icon-option" data-icon="" title="Стандартная (по типу)">
+                        <div class="icon-preview">—</div>
+                    </div>
+                    <div class="icon-option" data-icon="router" title="Роутер">
+                        <img src="/static/icons/router.png" alt="router" onerror="this.style.display='none'">
+                    </div>
+                    <div class="icon-option" data-icon="switch" title="Коммутатор">
+                        <img src="/static/icons/switch.png" alt="switch" onerror="this.style.display='none'">
+                    </div>
+                    <div class="icon-option" data-icon="server" title="Сервер">
+                        <img src="/static/icons/server.png" alt="server" onerror="this.style.display='none'">
+                    </div>
+                    <div class="icon-option" data-icon="pc" title="ПК">
+                        <img src="/static/icons/pc.png" alt="pc" onerror="this.style.display='none'">
+                    </div>
+                    <div class="icon-option" data-icon="firewall" title="Файрвол">
+                        <img src="/static/icons/firewall.png" alt="firewall" onerror="this.style.display='none'">
+                    </div>
+                    <div class="icon-option" data-icon="cloud" title="Облако">
+                        <img src="/static/icons/cloud.png" alt="cloud" onerror="this.style.display='none'">
+                    </div>
+                </div>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Родительское устройство</label>
+                <select id="editNodeParent" class="form-input" onchange="refreshParentIps()">
+                    <option value="">— Корень карты —</option>
+                </select>
+            </div>
+            <div class="form-group" id="parentIpGroup" style="display: none;">
+                <label class="form-label">IP-порт родителя (к чему привязан)</label>
+                <select id="editNodeParentIp" class="form-input"></select>
+                <div class="form-hint">Выберите конкретный IP-порт родительского устройства.</div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn" onclick="closeModal('editNodeModal')">Отмена</button>
+                <button class="btn btn-success" onclick="saveEditedNode()" id="saveEditedNodeBtn">Сохранить</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Модалка: импорт -->
+    <div class="modal-overlay" id="importModal">
+        <div class="modal">
+            <div class="modal-header">
+                <div class="modal-title">Импорт карты</div>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Файл JSON</label>
+                <input type="file" id="importFile" accept=".json" class="form-input" onchange="onImportFileSelected(event)">
+                <div class="form-hint">Файл, созданный через «Экспорт»</div>
+            </div>
+            <div id="importPreview" style="display:none; background:var(--md-surface-2); padding:12px; border-radius:8px; margin-bottom:16px;">
+                <div style="font-size:13px; color:var(--md-on-surface);">
+                    <div><b>Название:</b> <span id="importName">—</span></div>
+                    <div><b>Узлов:</b> <span id="importNodes">—</span></div>
+                    <div><b>Связей:</b> <span id="importEdges">—</span></div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn" onclick="closeModal('importModal')">Отмена</button>
+                <button class="btn btn-primary" onclick="confirmImport()" id="confirmImportBtn" disabled>Импортировать</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Уведомления -->
+    <div class="notifications" id="notifications"></div>
+
+    <!-- Модалка: история узла -->
+    <div class="modal-overlay" id="historyModal">
+        <div class="modal" style="max-width: 900px;">
+            <div class="modal-header">
+                <div class="modal-title" id="historyTitle">История узла</div>
+            </div>
+            <div style="display:flex; gap:8px; margin-bottom:16px;">
+                <button class="btn" onclick="loadHistory(1)">1 час</button>
+                <button class="btn" onclick="loadHistory(24)">24 часа</button>
+                <button class="btn" onclick="loadHistory(168)">7 дней</button>
+                <button class="btn" onclick="loadHistory(720)">30 дней</button>
+            </div>
+            <div style="display:grid; grid-template-columns: repeat(4, 1fr); gap:8px; margin-bottom:16px;">
+                <div style="background:var(--md-surface-2); padding:12px; border-radius:8px; text-align:center;">
+                    <div style="font-size:20px; color:var(--md-success); font-weight:600;" id="histUptime">—%</div>
+                    <div style="font-size:10px; color:var(--md-on-surface-muted); text-transform:uppercase; letter-spacing:0.5px;">Доступность</div>
+                </div>
+                <div style="background:var(--md-surface-2); padding:12px; border-radius:8px; text-align:center;">
+                    <div style="font-size:20px; color:var(--md-primary); font-weight:600;" id="histAvg">— ms</div>
+                    <div style="font-size:10px; color:var(--md-on-surface-muted); text-transform:uppercase; letter-spacing:0.5px;">Ср. latency</div>
+                </div>
+                <div style="background:var(--md-surface-2); padding:12px; border-radius:8px; text-align:center;">
+                    <div style="font-size:20px; color:var(--md-warning); font-weight:600;" id="histChecks">—</div>
+                    <div style="font-size:10px; color:var(--md-on-surface-muted); text-transform:uppercase; letter-spacing:0.5px;">Проверок</div>
+                </div>
+                <div style="background:var(--md-surface-2); padding:12px; border-radius:8px; text-align:center;">
+                    <div style="font-size:20px; color:var(--md-error); font-weight:600;" id="histOffline">—</div>
+                    <div style="font-size:10px; color:var(--md-on-surface-muted); text-transform:uppercase; letter-spacing:0.5px;">Offline</div>
+                </div>
+            </div>
+            <div style="height: 300px; position:relative; margin-bottom:16px;">
+                <canvas id="historyChart"></canvas>
+            </div>
+            <div class="modal-footer">
+                <button class="btn" onclick="closeModal('historyModal')">Закрыть</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Модалка: связывание корней -->
+    <div class="modal-overlay" id="linkRootsModal">
+        <div class="modal">
+            <div class="modal-header">
+                <div class="modal-title">Связать корни</div>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Первый корень (source)</label>
+                <select id="linkSourceRoot" class="form-input"></select>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Второй корень (target)</label>
+                <select id="linkTargetRoot" class="form-input"></select>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Тип связи</label>
+                <select id="linkType" class="form-input">
+                    <option value="vpn">VPN</option>
+                    <option value="router">Роутер</option>
+                    <option value="cable">Кабель</option>
+                    <option value="direct">Прямой</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Примечание (опционально)</label>
+                <input type="text" id="linkNote" class="form-input" placeholder="Например: Туннель через провайдера">
+            </div>
+            <div class="modal-footer">
+                <button class="btn" onclick="closeModal('linkRootsModal')">Отмена</button>
+                <button class="btn btn-primary" onclick="linkRoots()" id="linkRootsBtn">Связать</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Модалка: объединение устройств -->
+    <div class="modal-overlay" id="mergeModal">
+        <div class="modal" style="max-width: 700px;">
+            <div class="modal-header">
+                <div class="modal-title">Объединить устройства</div>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Название устройства</label>
+                <input type="text" id="mergeName" class="form-input" placeholder="Core-Router-01">
+            </div>
+            <div class="form-group">
+                <label class="form-label">Тип</label>
+                <select id="mergeType" class="form-input">
+                    <option value="router">Router</option>
+                    <option value="switch">Switch</option>
+                    <option value="server">Server</option>
+                    <option value="firewall">Firewall</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Вендор</label>
+                <input type="text" id="mergeVendor" class="form-input" placeholder="Cisco / MikroTik / Huawei">
+            </div>
+            <div class="form-group">
+                <label class="form-label">Модель</label>
+                <input type="text" id="mergeModel" class="form-input" placeholder="CCR2004-1G-12S+2XS">
+            </div>
+            <div class="form-group">
+                <label class="form-label">Отметьте IP-устройства для объединения</label>
+                <div id="mergeNodeList" style="max-height: 300px; overflow-y: auto; background: var(--md-surface-2); padding: 10px; border-radius: 8px;"></div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn" onclick="closeModal('mergeModal')">Отмена</button>
+                <button class="btn btn-primary" onclick="doMerge()">Объединить</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Модалка: редактирование интерфейсов -->
+    <div class="modal-overlay" id="editInterfacesModal">
+        <div class="modal">
+            <div class="modal-header">
+                <div class="modal-title">Интерфейсы узла</div>
+            </div>
+            <div class="form-group">
+                <label class="form-label">IP-адреса (через запятую или с новой строки)</label>
+                <textarea id="editInterfacesList" class="form-input" rows="6" placeholder="10.0.0.1&#10;10.0.0.2&#10;10.0.0.3"></textarea>
+                <div class="form-hint">Каждый IP — отдельный интерфейс (порт).</div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn" onclick="closeModal('editInterfacesModal')">Отмена</button>
+                <button class="btn btn-primary" onclick="saveInterfaces()">Сохранить</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/js/main.js"></script>
+</body>
+</html>

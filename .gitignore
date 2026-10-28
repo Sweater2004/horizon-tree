@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+.venv/
+
+# База данных
+monitor.db
+monitor.db-wal
+monitor.db-shm
+*.sqlite
+*.sqlite3
+
+# Пароли и секреты
+admin_password.txt
+gui_config.json
+.env
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Логи
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Бэкапы
+*.bak
+*.bak2

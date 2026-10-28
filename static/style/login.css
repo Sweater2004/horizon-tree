@@ -1,0 +1,101 @@
+/* ====== СТРАНИЦА ЛОГИНА ====== */
+.login-page {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    padding: 20px;
+}
+.login-card {
+    background: var(--md-surface);
+    border: 1px solid var(--md-outline-variant);
+    border-radius: var(--md-radius-xl);
+    padding: 40px;
+    width: 100%;
+    max-width: 400px;
+    box-shadow: var(--md-shadow-3);
+}
+.login-logo {
+    text-align: center;
+    margin-bottom: 8px;
+}
+.login-logo h1 {
+    color: var(--md-on-surface);
+    font-size: 32px;
+    font-weight: 500;
+    letter-spacing: -0.5px;
+}
+.login-logo h1 span { color: var(--md-primary); }
+.login-subtitle {
+    text-align: center;
+    color: var(--md-on-surface-muted);
+    margin-bottom: 32px;
+    font-size: 14px;
+}
+.login-card .form-group { margin-bottom: 18px; }
+.login-card .btn {
+    width: 100%;
+    padding: 14px;
+    font-size: 15px;
+    margin-top: 8px;
+}
+.login-error {
+    color: var(--md-error);
+    text-align: center;
+    margin-top: 16px;
+    font-size: 13px;
+    display: none;
+    padding: 10px;
+    background: var(--md-error-container);
+    border-radius: var(--md-radius-sm);
+    border: 1px solid rgba(207, 102, 121, 0.3);
+}
+.login-error.show { display: block; }
+.login-hint {
+    text-align: center;
+    color: var(--md-on-surface-muted);
+    font-size: 12px;
+    margin-top: 20px;
+    padding: 12px;
+    background: var(--md-surface-2);
+    border-radius: var(--md-radius-sm);
+    border: 1px dashed var(--md-outline);
+}
+.login-hint code {
+    background: var(--md-surface-3);
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 12px;
+    color: var(--md-primary);
+    font-family: 'JetBrains Mono', monospace;
+}
+.login-footer {
+    margin-top: 24px;
+    text-align: center;
+    color: var(--md-on-surface-muted);
+    font-size: 12px;
+    border-top: 1px solid var(--md-outline-variant);
+    padding-top: 20px;
+}
+.login-spinner {
+    display: none;
+    width: 18px;
+    height: 18px;
+    border: 2px solid rgba(26, 26, 26, 0.3);
+    border-top: 2px solid #1a1a1a;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+}
+@keyframes spin { 100% { transform: rotate(360deg); } }
+.login-card .btn.loading .login-spinner { display: inline-block; }
+.login-card .btn.loading .btn-text { display: none; }
+/* ====== ФИКС АВТОЗАПОЛНЕНИЯ (жёлтый фон) ====== */
+.login-card .form-input:-webkit-autofill,
+.login-card .form-input:-webkit-autofill:hover,
+.login-card .form-input:-webkit-autofill:focus,
+.login-card .form-input:-webkit-autofill:active {
+    -webkit-box-shadow: 0 0 0 30px var(--md-surface-2) inset !important;
+    -webkit-text-fill-color: var(--md-on-surface) !important;
+    transition: background-color 5000s ease-in-out 0s;
+    caret-color: var(--md-on-surface);
+}
