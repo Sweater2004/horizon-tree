@@ -153,21 +153,26 @@ def _process_map(map_row: tuple, conn: sqlite3.Connection, batch_write: list):
 
 
 def run_once(interval_limit: int = 60):
-    """Один проход по всем картам (только активной, если есть)."""
-    import state
-    active_id = state.ACTIVE_MAP_ID
-    
+    """Один проход по всем картам (кроме композиций)."""
     conn = sqlite3.connect(DB_PATH := _get_db_path())
     cur = conn.cursor()
     
-    if active_id:
-        cur.execute("SELECT id, data FROM network_maps WHERE id = ?", (active_id,))
-        maps = cur.fetchall()
-        print_info(f"🎯 Планировщик: активная карта {active_id}")
-    else:
-        cur.execute("SELECT id, data FROM network_maps")
-        maps = cur.fetchall()
-        print_info(f"🎯 Планировщик: активной нет, проверяем все ({len(maps)})")
+    # Берем ВСЕ карты, кроме композиций
+    cur.execute("SELECT id, data FROM network_maps")
+    all_maps = cur.fetchall()
+    
+    maps = []
+    for map_row in all_maps:
+        map_id, data_json = map_row
+        try:
+            data = json.loads(data_json)
+            if data.get("settings", {}).get("is_composite"):
+                continue
+            maps.append(map_row)
+        except Exception:
+            pass
+    
+    print_info(f"🎯 Планировщик: проверяем {len(maps)} карт (композиции пропущены)")
 
     batch_write = []
     total_nodes = 0

@@ -237,35 +237,63 @@ function initGraph() {
     }
     document.getElementById('emptyState').style.display = 'none';
 
+    const isComposite = !!(currentMap.data.settings && currentMap.data.settings.is_composite);
     const nodeMap = Object.fromEntries(currentMap.data.nodes.map(n => [n.id, n]));
 
-        const nodes = currentMap.data.nodes.map(n => {
-        const status = n.aggregated_status || 'unknown';
-        // Цвет фона по статусу
-        const bgColor = {
-            online:  '#4caf50',
-            offline: '#cf6679',
-            mixed:   '#ff9800',
-            unknown: '#6b7280'
-        }[status] || '#6b7280';
-        
-        const ips = (n.ip || '').split(',').map(s => s.trim()).filter(Boolean);
-        let displayLabel = '';
-        if (ips.length > 1) {
-            displayLabel = `${n.name || 'Устройство'}\n(${ips.length} IP)`;
-        } else {
-            displayLabel = `${n.name || n.ip}\n${n.ip || ''}`;
-        }
-        
+    const nodes = currentMap.data.nodes.map(n => {
         const meta = n.metadata || {};
-        const customIcon = meta.icon;
-        const iconUrl = customIcon 
-            ? `/static/icons/${customIcon}.png` 
-            : null;
+        
+               // === КОМПОЗИЦИЯ ===
+        if (n.is_composite) {
+            const cStatus = n.aggregated_status || 'unknown';
+            const statusColors = {
+                online:  { bg: 'rgba(76, 175, 80, 0.15)',  border: '#4caf50' },
+                offline: { bg: 'rgba(207, 102, 121, 0.15)', border: '#cf6679' },
+                mixed:   { bg: 'rgba(255, 152, 0, 0.15)',   border: '#ff9800' },
+                unknown: { bg: 'rgba(106, 76, 147, 0.15)',  border: '#6a4c93' }
+            };
+            const cCol = statusColors[cStatus] || statusColors.unknown;
+
+            // Обрезаем имя, если оно слишком длинное (максимум 12 символов)
+            const rawName = n.name || 'Карта';
+            const shortName = rawName.length > 12 ? rawName.substring(0, 10) + '..' : rawName;
+            
+            const label = `${shortName}\n${meta.total_devices || 0} устр.`;
+            
+            return {
+                id: n.id,
+                label: label,
+                title: `Карта: ${rawName}\nУстройств: ${meta.total_devices}\nСтатус: ${cStatus}\n\n(Кликните, чтобы открыть карту)`,
+                shape: 'circle',
+                size: 55,
+                widthConstraint: { maximum: 90 }, // Жестко ограничиваем ширину текста
+                color: {
+                    background: cCol.bg,
+                    border: cCol.border,
+                    highlight: { background: cCol.border, border: '#ffffff' }
+                },
+                font: {
+                    color: '#ffffff',
+                    size: 12, // Чуть уменьшили шрифт
+                    face: 'Roboto',
+                    align: 'center',
+                    vadjust: 0,
+                    multi: false // Запрещаем многострочный текст (чтобы не раздувало узел)
+                },
+                borderWidth: 4
+            };
+        }
+
+        // === ОБЫЧНЫЕ УЗЛЫ ===
+        const status = n.aggregated_status || 'unknown';
+        const bgColor = { online: '#4caf50', offline: '#cf6679', mixed: '#ff9800', unknown: '#6b7280' }[status] || '#6b7280';
+        const ips = (n.ip || '').split(',').map(s => s.trim()).filter(Boolean);
+        const displayLabel = ips.length > 1 ? `${n.name || 'Устройство'}\n(${ips.length} IP)` : `${n.name || n.ip}\n${n.ip || ''}`;
         
         let nodeObj;
+        const iconUrl = meta.icon ? `/static/icons/${meta.icon}.png` : null;
+        
         if (iconUrl) {
-            // Иконка в цветном круге (фон = статус)
             nodeObj = {
                 id: n.id,
                 label: displayLabel,
@@ -273,30 +301,16 @@ function initGraph() {
                 shape: 'circularImage',
                 image: iconUrl,
                 size: n.is_root ? 40 : 32,
-                color: {
-                    background: bgColor,
-                    border: bgColor,
-                    highlight: { background: bgColor, border: '#ffffff' }
-                },
+                color: { background: bgColor, border: bgColor, highlight: { background: bgColor, border: '#ffffff' } },
                 borderWidth: 3,
-                font: { 
-                    color: '#e1e1e6', 
-                    size: 11, 
-                    face: 'Roboto', 
-                    vadjust: 40
-                }
+                font: { color: '#e1e1e6', size: 11, face: 'Roboto', vadjust: 40 }
             };
         } else {
-            // Обычный бокс
             nodeObj = {
                 id: n.id,
                 label: displayLabel,
                 title: `IP: ${n.ip || '—'}\nТип: ${n.type || 'unknown'}\nСтатус: ${status}`,
-                color: { 
-                    background: bgColor + '30', 
-                    border: bgColor, 
-                    highlight: { background: bgColor + '50', border: bgColor } 
-                },
+                color: { background: bgColor + '30', border: bgColor, highlight: { background: bgColor + '50', border: bgColor } },
                 font: { color: '#e1e1e6', size: 12, face: 'Roboto', align: 'center' },
                 shape: n.is_root ? 'star' : 'box',
                 borderWidth: 2
@@ -313,52 +327,40 @@ function initGraph() {
     const edges = (currentMap.data.edges || [])
         .filter(e => e && e.source && e.target && nodeMap[e.source] && nodeMap[e.target])
         .filter((e, i, arr) => arr.findIndex(x => x.source === e.source && x.target === e.target) === i)
-                .map(e => {
-            const targetNode = nodeMap[e.target];
-            const targetStatus = targetNode?.aggregated_status || 'unknown';
+        .map(e => {
+            const isLink = e.type === 'composite-link';
+            let color = '#9ca3af', highlight = '#d1d5db';
             
-            // Цвет по доступности: online → зелёный, offline → красный, unknown → серый
-            const edgeColor = targetStatus === 'online' 
-                ? 'rgba(74, 222, 128, 0.7)'
-                : targetStatus === 'offline' 
-                    ? 'rgba(248, 113, 113, 0.7)'
-                    : 'rgba(156, 163, 175, 0.5)';
-            const highlightColor = targetStatus === 'online' 
-                ? '#4ade80' 
-                : targetStatus === 'offline' 
-                    ? '#f87171' 
-                    : '#9ca3af';
-            
-            // Подпись: from_ip → to_ip (если есть)
-            const label = (e.from_ip && e.to_ip) 
-                ? `${e.from_ip} → ${e.to_ip}` 
-                : undefined;
-            
-            // Tooltip: подробная информация
-            const title = `Связь: ${e.from_ip || '?'} → ${e.to_ip || '?'}\n` +
-                          `Статус: ${targetStatus}\n` +
-                          `Узел: ${targetNode?.ip || '?'}`;
+            if (isLink) {
+                const colors = {
+                    cable: { c: '#ff9800', h: '#ffb74d' },
+                    fiber: { c: '#4caf50', h: '#81c784' },
+                    radio: { c: '#2196f3', h: '#64b5f6' },
+                    vpn:   { c: '#bb86fc', h: '#cf9fff' },
+                    direct:{ c: '#9ca3af', h: '#d1d5db' }
+                };
+                const lc = colors[e.link_type] || colors.direct;
+                color = lc.c; highlight = lc.h;
+            } else {
+                const targetStatus = nodeMap[e.target]?.aggregated_status || 'unknown';
+                if (targetStatus === 'online') { color = 'rgba(74,222,128,0.7)'; highlight = '#4ade80'; }
+                else if (targetStatus === 'offline') { color = 'rgba(248,113,113,0.7)'; highlight = '#f87171'; }
+                else { color = 'rgba(156,163,175,0.5)'; highlight = '#9ca3af'; }
+            }
             
             return {
                 id: e.id,
                 from: e.source,
                 to: e.target,
-                label: label,
-                title: title,
-                arrows: { to: { enabled: true, scaleFactor: 0.6 } },
-                color: {
-                    color: edgeColor,
-                    highlight: highlightColor
-                },
-                width: targetStatus === 'offline' ? 2.5 : 2,
-                font: { 
-                    color: '#c0c0c8', 
-                    size: 10, 
-                    background: 'rgba(26, 26, 31, 0.85)',
-                    strokeWidth: 0
-                },
-                dashes: e.type !== 'parent-child',
-                smooth: { type: 'continuous' }
+                label: isLink ? (e.link_type || '').toUpperCase() : (e.from_ip && e.to_ip ? `${e.from_ip} → ${e.to_ip}` : undefined),
+                title: isLink ? `Связь: ${e.link_type}\n${e.note || ''}` : `Связь: ${e.from_ip || '?'} → ${e.to_ip || '?'}`,
+                arrows: { to: { enabled: true, scaleFactor: 0.8 } },
+                color: { color: color, highlight: highlight },
+                width: isLink ? 4 : 2,
+                dashes: isLink ? [10, 5] : (e.type !== 'parent-child'),
+                font: { color: '#ffffff', size: 12, strokeWidth: 3, strokeColor: '#0f0f12' },
+                smooth: { type: 'continuous' },
+                isCompositeLink: isLink
             };
         });
 
@@ -366,23 +368,58 @@ function initGraph() {
     const data = { nodes: new vis.DataSet(nodes), edges: new vis.DataSet(edges) };
     
     const options = {
-        physics: { stabilization: { enabled: true, iterations: 300 }, barnesHut: { gravitationalConstant: -4000, springLength: 150 } },
+        physics: { enabled: !isComposite, stabilization: { enabled: true, iterations: 300 } },
         interaction: { hover: true, dragNodes: true }
     };
     
     if (network) network.destroy();
     network = new vis.Network(container, data, options);
 
+    // Принудительный пересчёт размеров для композиции
+    if (isComposite) {
+        setTimeout(() => {
+            if (!network) return;
+            network.redraw(); // Перерисовываем
+            network.fit({ animation: false }); // Подгоняем зум
+        }, 100);
+    }
+
+    // Принудительный зум для композиции
+    if (isComposite) {
+        setTimeout(() => {
+            if (network) network.fit({ animation: false });
+        }, 50);
+    }
+
     network.on('click', params => {
         if (params.nodes.length > 0) {
+            // Открываем модалку свойств (как для обычного узла, так и для контейнера)
             selectNode(params.nodes[0]);
             openPropsPanel();
         } else {
             closePropsPanel();
         }
     });
+    
     network.on('dragEnd', params => {
         if (params.nodes.length > 0) savePositionsDebounced();
+    });
+
+    // Удаление связи правым кликом
+    network.on('oncontext', async (params) => {
+        params.event.preventDefault();
+        if (params.edges.length === 0) return;
+        const edgeId = params.edges[0];
+        const edge = network.body.data.edges.get(edgeId);
+        if (!edge || edge.isCompositeLink !== true) return;
+        if (!confirm('Удалить связь между картами?')) return;
+        const resp = await api(`/api/maps/${currentMap.id}/composite-link/${edgeId}`, { method: 'DELETE' });
+        if (!resp || !resp.ok) {
+            showNotification('Ошибка удаления связи', 'error');
+            return;
+        }
+        network.body.data.edges.remove(edgeId);
+        showNotification('Связь удалена', 'success');
     });
 }
 
@@ -406,6 +443,16 @@ async function savePositions() {
 }
 
 function updateGraphData() {
+    if (currentMap && currentMap.data && currentMap.data.settings && currentMap.data.settings.is_composite) {
+        return;
+    }
+    if (!network || !currentMap) return;
+    
+    // Если композиция — физику не трогаем
+    if (currentMap.data && currentMap.data.settings && currentMap.data.settings.is_composite) {
+        return;
+    }
+    
     if (!network || !currentMap) return;
     const currentNodes = currentMap.data.nodes || [];
     const nodeUpdates = currentNodes.map(n => {
@@ -437,45 +484,77 @@ function updateGraphData() {
 // ====== ВЫБОР УЗЛА ======
 function selectNode(nodeId) {
     selectedNodeId = nodeId;
-    selectedNode = currentMap.data.nodes.find(n => n.id === nodeId);
-    if (!selectedNode) return;
+    const node = currentMap.data.nodes.find(n => n.id === nodeId);
+    if (!node) return;
 
-    // Открываем модалку (панель + оверлей)
+    selectedNode = node;
+
     openPropsPanel();
 
-    document.getElementById('propsTitle').textContent = selectedNode.name || selectedNode.ip;
+    document.getElementById('propsTitle').textContent = node.name || node.ip || '—';
     
-    // Список интерфейсов (IP-портов)
-    const interfaces = selectedNode.interfaces || (selectedNode.ip ? selectedNode.ip.split(',').map(s => s.trim()) : []);
+    const interfaces = node.interfaces || (node.ip ? node.ip.split(',').map(s => s.trim()) : []);
     document.getElementById('propsIp').innerHTML = interfaces.map(ip => 
         `<div style="font-family: 'JetBrains Mono', monospace; font-size: 12px; padding: 2px 0; color: #e0e0e5;">${ip}</div>`
     ).join('');
     
-    document.getElementById('propsType').textContent = selectedNode.type || '—';
-    document.getElementById('propsDiscovered').textContent = (selectedNode.discovered_by || []).join(', ') || '—';
-    document.getElementById('propsStatus').textContent = selectedNode.aggregated_status || 'unknown';
+    document.getElementById('propsType').textContent = node.type || '—';
+    document.getElementById('propsDiscovered').textContent = (node.discovered_by || []).join(', ') || '—';
+    document.getElementById('propsStatus').textContent = node.aggregated_status || 'unknown';
 
     const checksList = document.getElementById('checksList');
-    if (!selectedNode.checks || selectedNode.checks.length === 0) {
+    if (!node.checks || node.checks.length === 0) {
         checksList.innerHTML = '<div style="color: var(--md-on-surface-muted); font-size: 13px;">Нет проверок</div>';
     } else {
-        const statuses = selectedNode.status || {};
-        checksList.innerHTML = selectedNode.checks.map(c => {
-            const key = c.port ? `${c.type}_${c.port}` : c.type;
-            const st = statuses[key] || {};
-            const cls = st.status === 'online' ? 'online' : st.status === 'offline' ? 'offline' : 'unknown';
-            const lat = st.latency ? `${st.latency.toFixed(1)} ms` : '';
-            return `
-                <div class="check-item">
-                    <span class="check-name">${c.type}${c.port ? ':' + c.port : ''}</span>
-                    <span class="check-status ${cls}">${st.status || '—'} ${lat}</span>
-                </div>
-            `;
-        }).join('');
+        const statuses = node.status || {};
+        const ifaces = node.interfaces || (node.ip ? node.ip.split(',').map(s => s.trim()) : []);
+        
+        if (ifaces.length === 0) {
+            checksList.innerHTML = '<div style="color: var(--md-on-surface-muted); font-size: 13px;">Нет IP-адресов</div>';
+        } else {
+            checksList.innerHTML = ifaces.map(ip => {
+                const ipChecks = Object.keys(statuses).filter(k => k.startsWith(ip + '::'));
+                
+                if (ipChecks.length === 0) {
+                    return `
+                        <div class="check-item" style="opacity: 0.5;">
+                            <span class="check-name">${ip}</span>
+                            <span class="check-status unknown">нет данных</span>
+                        </div>
+                    `;
+                }
+                
+                let worstStatus = 'online';
+                let totalLatency = 0;
+                let count = 0;
+                
+                ipChecks.forEach(k => {
+                    const st = statuses[k];
+                    if (!st) return;
+                    if (st.status === 'offline' || st.status === 'error' || st.status === 'timeout') {
+                        worstStatus = st.status;
+                    } else if (st.status === 'mixed' && worstStatus === 'online') {
+                        worstStatus = 'mixed';
+                    }
+                    if (st.latency) { totalLatency += st.latency; count++; }
+                });
+                
+                const avgLatency = count > 0 ? (totalLatency / count).toFixed(1) : 0;
+                const cls = worstStatus === 'online' ? 'online' : worstStatus === 'offline' ? 'offline' : 'unknown';
+                const icon = worstStatus === 'online' ? '🟢' : worstStatus === 'offline' ? '🔴' : '🟡';
+                
+                return `
+                    <div class="check-item">
+                        <span class="check-name">${icon} ${ip}</span>
+                        <span class="check-status ${cls}">${worstStatus} ${avgLatency > 0 ? avgLatency + 'ms' : ''}</span>
+                    </div>
+                `;
+            }).join('');
+        }
     }
 
     const snmpSection = document.getElementById('snmpSection');
-    const meta = selectedNode.metadata || {};
+    const meta = node.metadata || {};
     if (meta.snmp_descr || meta.snmp_uptime || meta.snmp_name) {
         snmpSection.style.display = 'block';
         const parts = [];
@@ -488,6 +567,53 @@ function selectNode(nodeId) {
         snmpSection.style.display = 'none';
     }
 
+    // Удаляем старые кнопки
+    const oldLink = document.getElementById('compositeLinkBtn');
+    if (oldLink) oldLink.remove();
+    const oldGo = document.getElementById('compositeGoBtn');
+    if (oldGo) oldGo.remove();
+
+    // Кнопки для контейнера композиции
+    if (node.is_composite) {
+        const actions = document.querySelector('.props-actions');
+        if (actions) {
+            // Кнопка "Перейти внутрь" — передаем mapId через data-атрибут
+            if (node.composite_map_id) {
+                const goBtn = document.createElement('button');
+                goBtn.id = 'compositeGoBtn';
+                goBtn.className = 'btn btn-success';
+                goBtn.style.marginTop = '8px';
+                goBtn.style.width = '100%';
+                goBtn.textContent = 'Перейти внутрь карты';
+                goBtn.setAttribute('data-map-id', node.composite_map_id);
+                goBtn.onclick = function() {
+                    const targetId = this.getAttribute('data-map-id');
+                    closePropsPanel();
+                    selectMap(targetId);
+                };
+                actions.parentNode.insertBefore(goBtn, actions);
+            }
+
+            // Кнопка "Связать с другой картой" — передаем id узла
+            const linkBtn = document.createElement('button');
+            linkBtn.id = 'compositeLinkBtn';
+            linkBtn.className = 'btn btn-primary';
+            linkBtn.style.marginTop = '8px';
+            linkBtn.style.width = '100%';
+            linkBtn.textContent = 'Связать с другой картой';
+            linkBtn.setAttribute('data-node-id', node.id);
+            linkBtn.onclick = function() {
+                const nid = this.getAttribute('data-node-id');
+                const targetNode = currentMap.data.nodes.find(x => x.id === nid);
+                if (targetNode) {
+                    openCompositeLinkForm(targetNode);
+                } else {
+                    showNotification('Узел не найден', 'error');
+                }
+            };
+            actions.parentNode.insertBefore(linkBtn, actions);
+        }
+    }
     renderTree();
 }
 // ====== НОВАЯ КАРТА ======
@@ -845,7 +971,7 @@ function toggleAutoRefresh() {
 
 async function refreshMapSilent() {
     if (!currentMap || !autoRefreshEnabled) return;
-    
+
     // Адаптивный интервал
     const nodeCount = (currentMap.data.nodes || []).length;
     const newInterval = calculateRefreshInterval(nodeCount);
@@ -867,8 +993,26 @@ async function refreshMapSilent() {
         const newNodeIds = new Set(newNodes.map(n => n.id));
         
         // 1. Обновляем существующие устройства (только цвет/статус)
+                // 1. Обновляем существующие устройства (только цвет/статус)
         const updates = newNodes.filter(n => existingIds.has(n.id)).map(n => {
             const status = n.aggregated_status || 'unknown';
+            
+            // Для КОМПОЗИЦИИ
+            if (n.is_composite) {
+                const statusColors = {
+                    online:  { bg: 'rgba(76, 175, 80, 0.15)',  border: '#4caf50' },
+                    offline: { bg: 'rgba(207, 102, 121, 0.15)', border: '#cf6679' },
+                    mixed:   { bg: 'rgba(255, 152, 0, 0.15)',   border: '#ff9800' },
+                    unknown: { bg: 'rgba(106, 76, 147, 0.15)',  border: '#6a4c93' }
+                };
+                const cCol = statusColors[status] || statusColors.unknown;
+                return {
+                    id: n.id,
+                    color: { background: cCol.bg, border: cCol.border }
+                };
+            }
+            
+            // Для обычных устройств
             const bgColor = { 
                 online: '#4caf50', 
                 offline: '#cf6679', 
@@ -880,7 +1024,6 @@ async function refreshMapSilent() {
             const hasIcon = !!meta.icon;
             
             if (hasIcon) {
-                // circularImage — меняем только цвет фона
                 return {
                     id: n.id,
                     color: { 
@@ -890,7 +1033,6 @@ async function refreshMapSilent() {
                     }
                 };
             } else {
-                // обычный бокс — меняем цвет
                 return {
                     id: n.id,
                     color: { 
@@ -901,8 +1043,6 @@ async function refreshMapSilent() {
                 };
             }
         });
-        if (updates.length > 0) network.body.data.nodes.update(updates);
-        
         // 2. Удаляем устройства, которых больше нет (если сканирование удалило)
         const toRemove = [...existingIds].filter(id => !newNodeIds.has(id));
         if (toRemove.length > 0) network.body.data.nodes.remove(toRemove);
@@ -981,51 +1121,166 @@ async function refreshMapSilent() {
     }
 }
 
-// ====== РЕДАКТИРОВАНИЕ УЗЛА ======
-function openEditNodeModal() {
-    if (!selectedNode) { showNotification('Сначала выберите устройства', 'warning'); return; }
-    
-    document.getElementById('editNodeTitle').textContent = 
-        `Редактировать: ${selectedNode.name || selectedNode.ip}`;
-    document.getElementById('editNodeIp').value = selectedNode.ip;
-    document.getElementById('editNodeName').value = selectedNode.name || '';
-    document.getElementById('editNodeType').value = selectedNode.type || 'unknown';
+async function refreshMapSilent() {
+    if (!currentMap || !autoRefreshEnabled || !network) return;
 
-    // Заполняем список родителей (все устройства, кроме самого себя и потомков)
-    const select = document.getElementById('editNodeParent');
-    select.innerHTML = '<option value="">— Корень карты —</option>';
-    
-    function isDescendant(candidateId, nodeId, nodes) {
-        let current = nodes.find(n => n.id === candidateId);
-        while (current && current.parent_id) {
-            if (current.parent_id === nodeId) return true;
-            current = nodes.find(n => n.id === current.parent_id);
-        }
-        return false;
+    // Адаптивный интервал
+    const nodeCount = (currentMap.data.nodes || []).length;
+    const newInterval = calculateRefreshInterval(nodeCount);
+    if (newInterval !== currentRefreshInterval) {
+        currentRefreshInterval = newInterval;
+        if (autoRefreshTimer) clearInterval(autoRefreshTimer);
+        autoRefreshTimer = setInterval(refreshMapSilent, newInterval);
+        console.log(`[auto-refresh] ${nodeCount} узлов → ${newInterval / 1000}с`);
     }
     
-    (currentMap.data.nodes || []).forEach(n => {
-        if (n.id === selectedNode.id) return;
-        if (isDescendant(n.id, selectedNode.id, currentMap.data.nodes)) return;
-        const opt = document.createElement('option');
-        opt.value = n.id;
-        opt.textContent = `${n.name || n.ip} (${n.ip})`;
-        if (selectedNode.parent_id === n.id) opt.selected = true;
-        select.appendChild(opt);
-    });
-    
-    // Показать/скрыть блок IP-портов
-    refreshParentIps();
-    
-    // Инициализация выбора иконки
-    const currentIcon = (selectedNode.metadata && selectedNode.metadata.icon) || null;
-    selectedIconForNode = currentIcon;
-    document.querySelectorAll('#editNodeIconPicker .icon-option').forEach(opt => {
-        opt.classList.toggle('selected', opt.getAttribute('data-icon') === (currentIcon || ''));
-    });
-    initIconPicker();
-    
-    document.getElementById('editNodeModal').classList.add('show');
+    try {
+        const resp = await api(`/api/maps/${currentMap.id}`);
+        if (!resp || !resp.ok) return;
+        const newMap = await resp.json();
+        const newNodes = newMap.data.nodes || [];
+        
+        const existingIds = new Set(network.body.data.nodes.getIds());
+        const newNodeIds = new Set(newNodes.map(n => n.id));
+        
+        // 1. Обновляем существующие устройства (только цвет/статус)
+        const updates = newNodes.filter(n => existingIds.has(n.id)).map(n => {
+            const status = n.aggregated_status || 'unknown';
+            
+            // Для КОМПОЗИЦИИ
+            if (n.is_composite) {
+                const statusColors = {
+                    online:  { bg: 'rgba(76, 175, 80, 0.15)',  border: '#4caf50' },
+                    offline: { bg: 'rgba(207, 102, 121, 0.15)', border: '#cf6679' },
+                    mixed:   { bg: 'rgba(255, 152, 0, 0.15)',   border: '#ff9800' },
+                    unknown: { bg: 'rgba(106, 76, 147, 0.15)',  border: '#6a4c93' }
+                };
+                const cCol = statusColors[status] || statusColors.unknown;
+                return {
+                    id: n.id,
+                    color: { 
+                        background: cCol.bg, 
+                        border: cCol.border,
+                        highlight: { background: cCol.border, border: '#ffffff' }
+                    }
+                };
+            }
+            
+            // Для обычных устройств
+            const bgColor = { 
+                online: '#4caf50', 
+                offline: '#cf6679', 
+                mixed: '#ff9800', 
+                unknown: '#6b7280' 
+            }[status] || '#6b7280';
+            
+            const meta = n.metadata || {};
+            const hasIcon = !!meta.icon;
+            
+            if (hasIcon) {
+                return {
+                    id: n.id,
+                    color: { 
+                        background: bgColor, 
+                        border: bgColor, 
+                        highlight: { background: bgColor, border: '#ffffff' } 
+                    }
+                };
+            } else {
+                return {
+                    id: n.id,
+                    color: { 
+                        background: bgColor + '30', 
+                        border: bgColor, 
+                        highlight: { background: bgColor + '50', border: bgColor } 
+                    }
+                };
+            }
+        });
+        if (updates.length > 0) network.body.data.nodes.update(updates);
+        
+        // 2. Удаляем устройства, которых больше нет
+        const toRemove = [...existingIds].filter(id => !newNodeIds.has(id));
+        if (toRemove.length > 0) network.body.data.nodes.remove(toRemove);
+        
+        // 3. Добавляем новые устройства
+        const toAdd = newNodes.filter(n => !existingIds.has(n.id)).map(n => {
+            const status = n.aggregated_status || 'unknown';
+            const color = { online: '#4caf50', offline: '#cf6679', mixed: '#ff9800', unknown: '#6b7280' }[status] || '#6b7280';
+            const ips = (n.ip || '').split(',').map(s => s.trim()).filter(Boolean);
+            let label = ips.length > 1 
+                ? `${n.name || 'Устройство'}\n(${ips.length} IP)` 
+                : `${n.name || n.ip}\n${n.ip || ''}`;
+            return {
+                id: n.id,
+                label: label,
+                title: 'IP: ' + (n.ip || '—') + '\nТип: ' + (n.type || 'unknown'),
+                color: { background: color + '30', border: color },
+                font: { color: '#e1e1e6', size: 12, face: 'Roboto', align: 'center' },
+                shape: n.is_root ? 'star' : 'box',
+                borderWidth: 2
+            };
+        });
+        if (toAdd.length > 0) network.body.data.nodes.add(toAdd);
+        
+        // 4. Обновляем рёбра
+        const newNodeMap = Object.fromEntries(newNodes.map(n => [n.id, n]));
+        const newEdges = (newMap.data.edges || [])
+            .filter(e => e && e.source && e.target && newNodeMap[e.source] && newNodeMap[e.target])
+            .filter((e, i, arr) => arr.findIndex(x => x.source === e.source && x.target === e.target) === i)
+            .map(e => {
+                const isLink = e.type === 'composite-link';
+                let edgeColor, highlightColor;
+                
+                if (isLink) {
+                    const colors = {
+                        cable: { c: '#ff9800', h: '#ffb74d' },
+                        fiber: { c: '#4caf50', h: '#81c784' },
+                        radio: { c: '#2196f3', h: '#64b5f6' },
+                        vpn:   { c: '#bb86fc', h: '#cf9fff' },
+                        direct:{ c: '#9ca3af', h: '#d1d5db' }
+                    };
+                    const lc = colors[e.link_type] || colors.direct;
+                    edgeColor = lc.c; highlightColor = lc.h;
+                } else {
+                    const targetStatus = newNodeMap[e.target]?.aggregated_status || 'unknown';
+                    edgeColor = targetStatus === 'online' 
+                        ? 'rgba(74, 222, 128, 0.7)'
+                        : targetStatus === 'offline' 
+                            ? 'rgba(248, 113, 113, 0.7)'
+                            : 'rgba(156, 163, 175, 0.5)';
+                    highlightColor = targetStatus === 'online' 
+                        ? '#4ade80' 
+                        : targetStatus === 'offline' 
+                            ? '#f87171' 
+                            : '#9ca3af';
+                }
+                
+                return {
+                    id: e.id,
+                    from: e.source,
+                    to: e.target,
+                    label: isLink ? (e.link_type || '').toUpperCase() : ((e.from_ip && e.to_ip) ? `${e.from_ip} → ${e.to_ip}` : undefined),
+                    title: isLink ? `Связь: ${e.link_type}\n${e.note || ''}` : `Связь: ${e.from_ip || '?'} → ${e.to_ip || '?'}`,
+                    arrows: { to: { enabled: true, scaleFactor: 0.8 } },
+                    color: { color: edgeColor, highlight: highlightColor },
+                    width: isLink ? 4 : 2,
+                    dashes: isLink ? [10, 5] : (e.type !== 'parent-child'),
+                    font: { color: '#ffffff', size: 12, strokeWidth: 3, strokeColor: '#0f0f12' },
+                    smooth: { type: 'continuous' },
+                    isCompositeLink: isLink
+                };
+            });
+        network.body.data.edges.clear();
+        network.body.data.edges.add(newEdges);
+        
+        currentMap = newMap;
+        renderTree();
+        loadMapStats();
+        
+    } catch (e) {
+        console.debug('Auto-refresh error:', e);
+    }
 }
 
 function refreshParentIps() {
@@ -1579,7 +1834,266 @@ async function saveNodeIcon(iconName) {
     
     return true;
 }
+// ============================================================
+// ОБЪЕДИНЕНИЕ КАРТ (КОМПОЗИЦИЯ)
+// ============================================================
 
+let compositeSelectedMaps = [];
+
+async function openCompositeModal() {
+    compositeSelectedMaps = [];
+    document.getElementById('compositeName').value = '';
+    document.getElementById('compositeRootMap').innerHTML = '<option value="">— Выберите после карт —</option>';
+    
+    const resp = await api('/api/maps/composite-available');
+    if (!resp || !resp.ok) {
+        showNotification('Ошибка загрузки карт', 'error');
+        return;
+    }
+    const data = await resp.json();
+    
+    const list = document.getElementById('compositeMapList');
+    if (!data.maps || data.maps.length === 0) {
+        list.innerHTML = '<div style="color:var(--md-on-surface-muted);">Нет карт для объединения</div>';
+        return;
+    }
+    
+    list.innerHTML = data.maps.map(m => `
+        <label class="composite-map-item" style="display:flex; align-items:center; gap:10px; padding:10px; cursor:pointer; border-radius:6px; border:1px solid transparent; margin-bottom:4px;">
+            <input type="checkbox" class="composite-checkbox" value="${m.id}" 
+                   data-name="${escapeHtml(m.name)}" 
+                   onchange="toggleCompositeMap(this)">
+            <div style="flex:1;">
+                <div style="color:var(--md-on-surface); font-weight:500;">${escapeHtml(m.name)}</div>
+                <div style="color:var(--md-on-surface-muted); font-size:12px;">
+                    Устройств: ${m.total_devices} · Коммутаторов: ${m.switch_count}
+                    ${m.root_ip ? ' · Корень: ' + escapeHtml(m.root_ip) : ''}
+                </div>
+            </div>
+        </label>
+    `).join('');
+    
+    document.getElementById('compositeModal').classList.add('show');
+}
+
+function toggleCompositeMap(checkbox) {
+    const mapId = checkbox.value;
+    const mapName = checkbox.getAttribute('data-name');
+    
+    if (checkbox.checked) {
+        compositeSelectedMaps.push({ id: mapId, name: mapName });
+    } else {
+        compositeSelectedMaps = compositeSelectedMaps.filter(m => m.id !== mapId);
+    }
+    
+    // Обновляем селект "корневая карта"
+    const rootSelect = document.getElementById('compositeRootMap');
+    rootSelect.innerHTML = '<option value="">— Выберите —</option>';
+    compositeSelectedMaps.forEach(m => {
+        rootSelect.innerHTML += `<option value="${m.id}">${escapeHtml(m.name)}</option>`;
+    });
+}
+
+async function createComposite() {
+    const name = document.getElementById('compositeName').value.trim();
+    const rootMapId = document.getElementById('compositeRootMap').value;
+    
+    if (!name) {
+        showNotification('Введите название', 'error');
+        return;
+    }
+    if (compositeSelectedMaps.length < 2) {
+        showNotification('Выберите минимум 2 карты', 'error');
+        return;
+    }
+    if (!rootMapId) {
+        showNotification('Выберите корневую карту', 'error');
+        return;
+    }
+    
+    const resp = await api('/api/maps/composite', {
+        method: 'POST',
+        body: JSON.stringify({
+            name: name,
+            source_map_ids: compositeSelectedMaps.map(m => m.id),
+            root_map_id: rootMapId
+        })
+    });
+    
+    if (!resp || !resp.ok) {
+        let err = 'Ошибка создания';
+        try { const e = await resp.json(); err = e.detail || err; } catch {}
+        showNotification(err, 'error');
+        return;
+    }
+    
+    const data = await resp.json();
+    closeModal('compositeModal');
+    showNotification(`Композиция "${name}" создана`, 'success');
+    
+    await loadMaps();
+    await selectMap(data.map_id);
+}
+// ============================================================
+// РУЧНОЕ СВЯЗЫВАНИЕ КОНТЕЙНЕРОВ КОМПОЗИЦИИ
+// ============================================================
+let compositeLinkSourceNode = null;
+
+function openCompositeLinkForm(sourceNode) {
+    if (!sourceNode || !sourceNode.is_composite) {
+        showNotification('Это не контейнер композиции', 'error');
+        return;
+    }
+    compositeLinkSourceNode = sourceNode;
+
+    const containers = (currentMap.data.nodes || []).filter(
+        n => n.is_composite && n.id !== sourceNode.id
+    );
+    if (containers.length === 0) {
+        showNotification('Нет других контейнеров для связывания', 'warning');
+        return;
+    }
+
+    document.getElementById('compositeLinkSource').value =
+        `${sourceNode.name || '—'} (${sourceNode.composite_map_id || ''})`;
+
+    const targetSelect = document.getElementById('compositeLinkTarget');
+    targetSelect.innerHTML = containers.map(n =>
+        `<option value="${n.id}" data-map-id="${n.composite_map_id || ''}" data-root-node="${(n.metadata && n.metadata.root_node_id) || ''}">${escapeHtml(n.name || '—')}</option>`
+    ).join('');
+
+    document.getElementById('compositeLinkType').value = 'cable';
+    document.getElementById('compositeLinkNote').value = '';
+
+    document.getElementById('compositeLinkModal').classList.add('show');
+}
+
+async function submitCompositeLink() {
+    if (!compositeLinkSourceNode) return;
+
+    const targetSelect = document.getElementById('compositeLinkTarget');
+    const targetOption = targetSelect.options[targetSelect.selectedIndex];
+    if (!targetOption) {
+        showNotification('Выберите target-контейнер', 'error');
+        return;
+    }
+
+    const targetNodeId = targetSelect.value;
+    const targetNode = (currentMap.data.nodes || []).find(n => n.id === targetNodeId);
+    if (!targetNode) {
+        showNotification('Target-контейнер не найден', 'error');
+        return;
+    }
+
+    const sourceMapId = compositeLinkSourceNode.composite_map_id;
+    const targetMapId = targetNode.composite_map_id;
+    if (!sourceMapId || !targetMapId) {
+        showNotification('У контейнера нет composite_map_id', 'error');
+        return;
+    }
+
+    const linkType = document.getElementById('compositeLinkType').value;
+    const note = document.getElementById('compositeLinkNote').value.trim();
+
+    const btn = document.getElementById('compositeLinkSubmitBtn');
+    btn.disabled = true;
+
+    const resp = await api(`/api/maps/${currentMap.id}/composite-link`, {
+        method: 'POST',
+        body: JSON.stringify({
+            source_map_id: sourceMapId,
+            target_map_id: targetMapId,
+            source_root_node_id: (compositeLinkSourceNode.metadata && compositeLinkSourceNode.metadata.root_node_id) || '',
+            target_root_node_id: (targetNode.metadata && targetNode.metadata.root_node_id) || '',
+            link_type: linkType,
+            note: note || null
+        })
+    });
+
+    btn.disabled = false;
+
+    if (!resp || !resp.ok) {
+        let err = 'Ошибка создания связи';
+        try { const e = await resp.json(); err = e.detail || err; } catch {}
+        showNotification(err, 'error');
+        return;
+    }
+
+    closeModal('compositeLinkModal');
+    showNotification('Связь создана', 'success');
+
+    // Перезагружаем карту, чтобы появилось ребро
+    await selectMap(currentMap.id);
+}
+// ============================================================
+// ДОБАВЛЕНИЕ КАРТЫ В СУЩЕСТВУЮЩУЮ КОМПОЗИЦИЮ
+// ============================================================
+async function openAddMapToComposite() {
+    if (!currentMap || !currentMap.data.settings || !currentMap.data.settings.is_composite) {
+        showNotification('Это не карта-композиция', 'warning');
+        return;
+    }
+
+    const resp = await api('/api/maps/composite-available');
+    if (!resp || !resp.ok) {
+        showNotification('Ошибка загрузки списка карт', 'error');
+        return;
+    }
+    const data = await resp.json();
+
+    // Фильтруем карты, которые уже есть в композиции
+    const existingIds = new Set((currentMap.data.nodes || [])
+        .filter(n => n.is_composite)
+        .map(n => n.composite_map_id));
+
+    const availableMaps = (data.maps || []).filter(m => !existingIds.has(m.id));
+
+    if (availableMaps.length === 0) {
+        showNotification('Нет свободных карт для добавления', 'info');
+        return;
+    }
+
+    // Заполняем селект в модалке
+    const select = document.getElementById('addToCompositeSelect');
+    select.innerHTML = availableMaps.map(m => 
+        `<option value="${m.id}">${escapeHtml(m.name)} (${m.total_devices} устр.)</option>`
+    ).join('');
+
+    document.getElementById('addToCompositeModal').classList.add('show');
+}
+
+async function submitAddToComposite() {
+    if (!currentMap) return;
+    const mapId = document.getElementById('addToCompositeSelect').value;
+    if (!mapId) return;
+
+    const btn = document.getElementById('addToCompositeBtn');
+    btn.disabled = true;
+
+    // Отправляем запрос на сервер (нужно добавить эндпоинт)
+    const resp = await api(`/api/maps/${currentMap.id}/composite-add`, {
+        method: 'POST',
+        body: JSON.stringify({ source_map_id: mapId })
+    });
+
+    btn.disabled = false;
+
+    if (!resp || !resp.ok) {
+        let err = 'Ошибка добавления';
+        try { const e = await resp.json(); err = e.detail || err; } catch {}
+        showNotification(err, 'error');
+        return;
+    }
+
+    closeModal('addToCompositeModal');
+    showNotification('Карта добавлена в композицию', 'success');
+    await selectMap(currentMap.id);
+}
+
+window.openAddMapToComposite = openAddMapToComposite;
+window.submitAddToComposite = submitAddToComposite;
+window.openCompositeLinkForm = openCompositeLinkForm;
+window.submitCompositeLink = submitCompositeLink;
 window.openLinkRootsModal = openLinkRootsModal;
 window.linkRoots = linkRoots;
 window.selectNode = selectNode;

@@ -1022,3 +1022,13 @@ header h1 span { color: var(--md-primary); }
     color: var(--md-on-surface-muted);
     pointer-events: none;
 }
+/* Форма связывания контейнеров композиции */
+#compositeLinkModal .form-input[readonly] {
+    background: var(--md-surface-3);
+    color: var(--md-on-surface-muted);
+    cursor: default;
+}
+/* Жёсткий фикс: перебиваем цвета vis-network */
+div.vis-network canvas {
+    filter: none !important;
+}

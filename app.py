@@ -44,6 +44,14 @@ ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24
 # ============================================================
 
 app = FastAPI(title="Horizon Tree v5.0")
+@app.middleware("http")
+async def add_no_cache_headers(request: Request, call_next):
+    response = await call_next(request)
+    if request.url.path.startswith("/static/"):
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+    return response
 
 app.add_middleware(
     CORSMiddleware,
@@ -235,6 +243,364 @@ class MapCreate(BaseModel):
     is_public: bool = False
     allowed_subnets: Optional[List[str]] = None
     data: Optional[dict] = None
+class CompositeMapCreate(BaseModel):
+    name: str
+    description: Optional[str] = ""
+    source_map_ids: List[str]  # ID карт, которые объединяем
+    root_map_id: str  # ID карты, которая будет корнем (её корневой узел = общий)
+
+class CompositeLink(BaseModel):
+    source_map_id: str
+    target_map_id: str
+    source_root_node_id: str
+    target_root_node_id: str
+    link_type: str = "cable"  # cable / fiber / radio
+    note: Optional[str] = None
+
+@app.post("/api/maps/composite")
+async def create_composite_map(data: CompositeMapCreate, request: Request):
+    """Создать карту-композицию (объединение готовых карт)."""
+    user_data = get_user_from_request(request)
+    if not user_data:
+        raise HTTPException(401, "Требуется авторизация")
+    if not check_user_permission(user_data.get('role', 'viewer'), 'editor'):
+        raise HTTPException(403, "Требуется роль editor или admin")
+    
+    map_id = str(uuid.uuid4())
+    now = datetime.now().isoformat()
+    
+    # Загружаем все карты-источники
+    source_maps = []
+    with db_connection() as conn:
+        cur = conn.cursor()
+        for sid in data.source_map_ids:
+            cur.execute("SELECT id, name, data FROM network_maps WHERE id = ?", (sid,))
+            r = cur.fetchone()
+            if not r:
+                raise HTTPException(404, f"Карта {sid} не найдена")
+            source_maps.append({
+                "id": r[0],
+                "name": r[1],
+                "data": json.loads(r[2])
+            })
+    
+    # Строим композицию
+    composite_nodes = []
+    composite_edges = []
+    
+    for sm in source_maps:
+        sm_id = sm["id"]
+        sm_name = sm["name"]
+        sm_data = sm["data"]
+        nodes = sm_data.get("nodes", [])
+        
+        if not nodes:
+            continue
+        
+        # Ищем корневой узел (is_root=True) или первый
+        root_node = next((n for n in nodes if n.get("is_root")), nodes[0])
+        root_id = root_node["id"]
+        
+        # Считаем устройства (узлы) и коммутаторы (не root, type=switch)
+        total_devices = len(nodes)
+        switch_count = sum(1 for n in nodes if n.get("type") == "switch")
+        
+        # Создаём узел-контейнер для карты
+        container_id = f"composite-{sm_id}"
+        composite_nodes.append({
+            "id": container_id,
+            "ip": "",
+            "name": sm_name,
+            "type": "composite",
+            "is_composite": True,
+            "composite_map_id": sm_id,
+            "metadata": {
+                "total_devices": total_devices,
+                "switch_count": switch_count,
+                "root_node_id": root_id,
+                "root_node_ip": root_node.get("ip"),
+                "root_node_name": root_node.get("name"),
+                "access_level": "owner"  # упрощённо
+            },
+            "parent_id": None,
+            "hops_from_root": 0,
+            "is_root": (sm_id == data.root_map_id),
+            "checks": [],
+            "status": {},
+            "aggregated_status": "unknown",
+            "is_outside_whitelist": False,
+            "created_at": now,
+            "updated_at": now
+        })
+    
+    # Создаём карту
+    graph = {
+        "nodes": composite_nodes,
+        "edges": composite_edges,
+        "settings": {"auto_refresh": False, "is_composite": True},
+        "created_at": now,
+        "updated_at": now
+    }
+    
+    with db_write() as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO network_maps
+            (id, name, description, owner_id, is_public, created_at, updated_at,
+             data, allowed_subnets, current_version)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            map_id, data.name, data.description or "", user_data['sub'],
+            0, now, now,
+            json.dumps(graph, ensure_ascii=False),
+            json.dumps([], ensure_ascii=False),
+            1
+        ))
+        cur.execute("""
+            INSERT INTO map_versions (map_id, version, data, created_at, created_by, comment)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (map_id, 1, json.dumps(graph, ensure_ascii=False),
+              now, user_data['sub'], "Создание композиции"))
+    
+    log_action(user_data['sub'], f"create_composite_{data.name}",
+               {"map_id": map_id, "sources": data.source_map_ids},
+               request.client.host if request.client else "unknown")
+    
+    return {"success": True, "map_id": map_id, "name": data.name}
+
+
+@app.post("/api/maps/{map_id}/composite-link")
+async def composite_link(map_id: str, data: CompositeLink, request: Request):
+    """Связать два контейнера композиции (вручную)."""
+    user_data = get_user_from_request(request)
+    if not user_data:
+        raise HTTPException(401, "Требуется авторизация")
+    if not check_user_permission(user_data.get('role', 'viewer'), 'editor'):
+        raise HTTPException(403, "Требуется роль editor или admin")
+    
+    with db_write() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT data FROM network_maps WHERE id = ?", (map_id,))
+        r = cur.fetchone()
+        if not r:
+            raise HTTPException(404, "Карта не найдена")
+        
+        graph = json.loads(r[0])
+        nodes = graph.get("nodes", [])
+        
+        source_container = next((n for n in nodes if n.get("composite_map_id") == data.source_map_id), None)
+        target_container = next((n for n in nodes if n.get("composite_map_id") == data.target_map_id), None)
+        
+        if not source_container:
+            raise HTTPException(404, "Source карта не найдена в композиции")
+        if not target_container:
+            raise HTTPException(404, "Target карта не найдена в композиции")
+        
+        now = datetime.now().isoformat()
+        edge_id = f"composite-link-{data.source_map_id}-{data.target_map_id}"
+        
+        # Удаляем старую связь (если была)
+        graph["edges"] = [e for e in graph.get("edges", []) if e.get("id") != edge_id]
+        
+        graph["edges"].append({
+            "id": edge_id,
+            "source": source_container["id"],
+            "target": target_container["id"],
+            "type": "composite-link",
+            "link_type": data.link_type,
+            "source_root_node_id": data.source_root_node_id,
+            "target_root_node_id": data.target_root_node_id,
+            "note": data.note or "",
+            "created_at": now
+        })
+        
+        # Связываем корни (target становится child source)
+        target_container["parent_id"] = source_container["id"]
+        target_container["is_root"] = False
+        target_container["hops_from_root"] = (source_container.get("hops_from_root", 0) or 0) + 1
+        target_container["updated_at"] = now
+        
+        graph["updated_at"] = now
+        
+        cur.execute("UPDATE network_maps SET data = ?, updated_at = ? WHERE id = ?",
+                    (json.dumps(graph, ensure_ascii=False), now, map_id))
+    
+    return {"success": True, "edge_id": edge_id}
+
+@app.post("/api/maps/{map_id}/composite-add")
+async def add_map_to_composite(map_id: str, data: dict, request: Request):
+    """Добавить карту в существующую композицию (вручную)."""
+    user_data = get_user_from_request(request)
+    if not user_data:
+        raise HTTPException(401, "Требуется авторизация")
+    if not check_user_permission(user_data.get('role', 'viewer'), 'editor'):
+        raise HTTPException(403, "Требуется роль editor или admin")
+
+    source_map_id = data.get("source_map_id")
+    if not source_map_id:
+        raise HTTPException(400, "Не указан source_map_id")
+
+    with db_write() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT data FROM network_maps WHERE id = ?", (map_id,))
+        r = cur.fetchone()
+        if not r:
+            raise HTTPException(404, "Карта-композиция не найдена")
+
+        graph = json.loads(r[0])
+        if not graph.get("settings", {}).get("is_composite"):
+            raise HTTPException(400, "Это не композиция")
+
+        # Проверяем, есть ли уже такая карта в композиции
+        for n in graph.get("nodes", []):
+            if n.get("composite_map_id") == source_map_id:
+                raise HTTPException(400, "Эта карта уже есть в композиции")
+
+        # Загружаем исходную карту, чтобы получить её метаданные
+        cur.execute("SELECT id, name, data FROM network_maps WHERE id = ?", (source_map_id,))
+        src_row = cur.fetchone()
+        if not src_row:
+            raise HTTPException(404, "Исходная карта не найдена")
+
+        src_id, src_name, src_data_json = src_row
+        src_data = json.loads(src_data_json)
+        src_nodes = src_data.get("nodes", [])
+        
+        if not src_nodes:
+            raise HTTPException(400, "Исходная карта пуста")
+
+        root_node = next((n for n in src_nodes if n.get("is_root")), src_nodes[0])
+        total_devices = len(src_nodes)
+        switch_count = sum(1 for n in src_nodes if n.get("type") == "switch")
+
+        now = datetime.now().isoformat()
+        container_id = f"composite-{src_id}"
+
+        # Создаём контейнер
+        new_container = {
+            "id": container_id,
+            "ip": "",
+            "name": src_name,
+            "type": "composite",
+            "is_composite": True,
+            "composite_map_id": src_id,
+            "metadata": {
+                "total_devices": total_devices,
+                "switch_count": switch_count,
+                "root_node_id": root_node["id"],
+                "root_node_ip": root_node.get("ip"),
+                "root_node_name": root_node.get("name"),
+                "access_level": "owner"
+            },
+            "parent_id": None,
+            "hops_from_root": 0,
+            "is_root": False,
+            "checks": [],
+            "status": {},
+            "aggregated_status": "unknown",
+            "is_outside_whitelist": False,
+            "created_at": now,
+            "updated_at": now
+        }
+
+        graph["nodes"].append(new_container)
+        graph["updated_at"] = now
+
+        cur.execute("UPDATE network_maps SET data = ?, updated_at = ? WHERE id = ?",
+                    (json.dumps(graph, ensure_ascii=False), now, map_id))
+
+    return {"success": True, "container_id": container_id}
+
+@app.delete("/api/maps/{map_id}/composite-link/{edge_id}")
+async def composite_link_delete(map_id: str, edge_id: str, request: Request):
+    """Удалить ручную связь между контейнерами композиции."""
+    user_data = get_user_from_request(request)
+    if not user_data:
+        raise HTTPException(401, "Требуется авторизация")
+    if not check_user_permission(user_data.get('role', 'viewer'), 'editor'):
+        raise HTTPException(403, "Требуется роль editor или admin")
+
+    with db_write() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT data FROM network_maps WHERE id = ?", (map_id,))
+        r = cur.fetchone()
+        if not r:
+            raise HTTPException(404, "Карта не найдена")
+
+        graph = json.loads(r[0])
+        original_len = len(graph.get("edges", []))
+        removed = None
+
+        new_edges = []
+        for e in graph.get("edges", []):
+            if e.get("id") == edge_id and e.get("type") == "composite-link":
+                removed = e
+                continue
+            new_edges.append(e)
+
+        if removed is None:
+            raise HTTPException(404, "Связь не найдена")
+
+        graph["edges"] = new_edges
+
+        # Разрываем parent_id у target-контейнера (если он был)
+        target_container_id = removed.get("target")
+        source_container_id = removed.get("source")
+        for n in graph.get("nodes", []):
+            if n.get("id") == target_container_id and n.get("parent_id") == source_container_id:
+                n["parent_id"] = None
+                n["is_root"] = True
+                n["hops_from_root"] = 0
+                n["updated_at"] = datetime.now().isoformat()
+                break
+
+        graph["updated_at"] = datetime.now().isoformat()
+        cur.execute("UPDATE network_maps SET data = ?, updated_at = ? WHERE id = ?",
+                    (json.dumps(graph, ensure_ascii=False), graph["updated_at"], map_id))
+
+    return {"success": True, "edge_id": edge_id}
+
+@app.get("/api/maps/composite-available")
+async def list_available_for_composite(request: Request):
+    """Список карт, доступных для композиции."""
+    user_data = get_user_from_request(request)
+    if not user_data:
+        raise HTTPException(401, "Требуется авторизация")
+    
+    user_id = user_data['sub']
+    with db_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT nm.id, nm.name, nm.description, nm.data, nm.updated_at
+            FROM network_maps nm
+            WHERE nm.owner_id = ? OR nm.is_public = 1
+            ORDER BY nm.updated_at DESC
+        """, (user_id,))
+        
+        maps = []
+        for r in cur.fetchall():
+            data = json.loads(r[3])
+            nodes = data.get("nodes", [])
+            # Пропускаем композиции
+            if data.get("settings", {}).get("is_composite"):
+                continue
+            
+            total_devices = len(nodes)
+            switch_count = sum(1 for n in nodes if n.get("type") == "switch")
+            root_node = next((n for n in nodes if n.get("is_root")), None)
+            
+            maps.append({
+                "id": r[0],
+                "name": r[1],
+                "description": r[2],
+                "total_devices": total_devices,
+                "switch_count": switch_count,
+                "root_ip": root_node.get("ip") if root_node else None,
+                "root_name": root_node.get("name") if root_node else None,
+                "updated_at": r[4]
+            })
+    
+    return {"maps": maps}
 
 class MapUpdate(BaseModel):
     name: Optional[str] = None
@@ -378,9 +744,45 @@ async def get_map(map_id: str, request: Request):
     collaborator_perms = r[7]
     if not (is_owner or is_public or collaborator_perms):
         raise HTTPException(403, "Доступ запрещен")
+    
+    graph_data = json.loads(r[0])
+    
+    # === СЧИТАЕМ СТАТУС ДЛЯ КОМПОЗИЦИИ ===
+    if graph_data.get("settings", {}).get("is_composite"):
+        for container in graph_data.get("nodes", []):
+            if container.get("is_composite"):
+                src_map_id = container.get("composite_map_id")
+                if not src_map_id: continue
+                
+                # Загружаем исходную карту
+                with db_connection() as conn_inner:
+                    cur_inner = conn_inner.cursor()
+                    cur_inner.execute("SELECT data FROM network_maps WHERE id = ?", (src_map_id,))
+                    src_row = cur_inner.fetchone()
+                
+                if src_row:
+                    src_data = json.loads(src_row[0])
+                    src_nodes = src_data.get("nodes", [])
+                    
+                    online_count = sum(1 for n in src_nodes if n.get("aggregated_status") == "online")
+                    offline_count = sum(1 for n in src_nodes if n.get("aggregated_status") == "offline")
+                    total = len(src_nodes)
+                    
+                    if total == 0:
+                        container["aggregated_status"] = "unknown"
+                    elif online_count == total:
+                        container["aggregated_status"] = "online"
+                    elif offline_count == total:
+                        container["aggregated_status"] = "offline"
+                    elif online_count > 0:
+                        container["aggregated_status"] = "mixed"
+                    else:
+                        container["aggregated_status"] = "unknown"
+
+    # Заменяем старый return на новый (с graph_data)
     return {"id": map_id, "name": r[3], "description": r[4], "owner_id": r[1], "is_public": is_public,
             "allowed_subnets": json.loads(r[5]) if r[5] else [], "current_version": r[6],
-            "access_level": "owner" if is_owner else (collaborator_perms or "view"), "data": json.loads(r[0])}
+            "access_level": "owner" if is_owner else (collaborator_perms or "view"), "data": graph_data}
 
 @app.post("/api/maps/{map_id}/activate")
 async def activate_map(map_id: str, request: Request):

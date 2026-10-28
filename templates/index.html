@@ -29,6 +29,8 @@
                         <div class="dropdown-divider"></div>
                         <button class="dropdown-item" onclick="openMergeModal(); closeDropdown()">Объединить устройства</button>
                         <button class="dropdown-item" onclick="openLinkRootsModal(); closeDropdown()">Связать корни</button>
+                        <button class="dropdown-item" onclick="openCompositeModal(); closeDropdown()">Объединить карты</button>
+                                                <button class="dropdown-item" onclick="openAddMapToComposite(); closeDropdown()">Добавить карту сюда</button>
                     </div>
                 </div>
                 <span class="user-badge" id="userBadge">Загрузка...</span>
@@ -378,7 +380,34 @@
             </div>
         </div>
     </div>
-
+        <!-- Модалка: создание композиции -->
+    <div class="modal-overlay" id="compositeModal">
+        <div class="modal" style="max-width: 800px;">
+            <div class="modal-header">
+                <div class="modal-title">Объединить карты</div>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Название композиции</label>
+                <input type="text" id="compositeName" class="form-input" placeholder="Все сети">
+            </div>
+            <div class="form-group">
+                <label class="form-label">Выберите карты для объединения</label>
+                <div id="compositeMapList" style="max-height: 400px; overflow-y: auto; background: var(--md-surface-2); padding: 12px; border-radius: 8px;">
+                    Загрузка...
+                </div>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Корневая карта (её корень будет общим)</label>
+                <select id="compositeRootMap" class="form-input">
+                    <option value="">— Выберите после карт —</option>
+                </select>
+            </div>
+            <div class="modal-footer">
+                <button class="btn" onclick="closeModal('compositeModal')">Отмена</button>
+                <button class="btn btn-primary" onclick="createComposite()">Создать</button>
+            </div>
+        </div>
+    </div>
     <!-- Уведомления -->
     <div class="notifications" id="notifications"></div>
 
@@ -510,7 +539,56 @@
             </div>
         </div>
     </div>
-
+    <!-- Модалка: связать контейнеры композиции -->
+    <div class="modal-overlay" id="compositeLinkModal">
+        <div class="modal">
+            <div class="modal-header">
+                <div class="modal-title">Связать с другой картой</div>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Source-контейнер</label>
+                <input type="text" id="compositeLinkSource" class="form-input" readonly>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Target-контейнер</label>
+                <select id="compositeLinkTarget" class="form-input"></select>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Тип связи</label>
+                <select id="compositeLinkType" class="form-input">
+                    <option value="cable">cable (оранжевый)</option>
+                    <option value="fiber">fiber (зелёный)</option>
+                    <option value="radio">radio (синий)</option>
+                    <option value="vpn">vpn (фиолетовый)</option>
+                    <option value="direct">direct (серый)</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Примечание (опционально)</label>
+                <input type="text" id="compositeLinkNote" class="form-input" placeholder="Например: магистраль">
+            </div>
+            <div class="modal-footer">
+                <button class="btn" onclick="closeModal('compositeLinkModal')">Отмена</button>
+                <button class="btn btn-primary" id="compositeLinkSubmitBtn" onclick="submitCompositeLink()">Связать</button>
+            </div>
+        </div>
+    </div>
+        <!-- Модалка: Добавить карту в композицию -->
+    <div class="modal-overlay" id="addToCompositeModal">
+        <div class="modal">
+            <div class="modal-header">
+                <div class="modal-title">Добавить карту в композицию</div>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Выберите карту</label>
+                <select id="addToCompositeSelect" class="form-input"></select>
+            </div>
+            <div class="modal-footer">
+                <button class="btn" onclick="closeModal('addToCompositeModal')">Отмена</button>
+                <button class="btn btn-primary" id="addToCompositeBtn" onclick="submitAddToComposite()">Добавить</button>
+            </div>
+        </div>
+    </div>
     <script src="/static/js/main.js"></script>
 </body>
 </html>
